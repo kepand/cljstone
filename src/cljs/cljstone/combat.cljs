@@ -1,7 +1,7 @@
 (ns cljstone.combat
   (:require [schema.core :as s])
   (:use [cljstone.board :only [Board path-to-character]]
-        [cljstone.character :only [Character CharacterModifier Player other-player get-attack get-health]]
+        [cljstone.character :only [Character CharacterModifier Player other-player get-attack get-health has-taunt?]]
         [cljstone.combat-log :only [log-an-item]]
         [cljstone.minion :only [Minion]]
         [plumbing.core :only [safe-get safe-get-in]]))
@@ -43,13 +43,13 @@
 
 (s/defn cause-damage :- Board
   [board :- Board
-   character-id :- s/Int
+   character :- Character
    modifier :- CharacterModifier
    ; delay-death - if True, does *not* trim dead characters from the board after damage has been caused.
    ; Used when two characters are attacking each other - if two magma ragers fight each other, neither should
    ; die until both sides of the attack are complete, at which point both should die. Used by (attack).
    & [delay-death]]
-  (let [character-path (path-to-character board character-id)
+  (let [character-path (path-to-character board (:id character))
         modifiers-path (conj character-path :modifiers)]
     (let [board (-> board
                     (update-in modifiers-path conj modifier)
@@ -63,7 +63,6 @@
    c2 :- Character]
   ; TODO eventually take divine shield into account
   {:type :attack
-   :name nil
    :effect {:health (- (get-attack c1))}})
 
 ; TODO - when we get around to implementing secrets - what if get-down is up and bloodfen raptor attacks into something, and get-down kills it?
@@ -72,17 +71,13 @@
 ; on-before-attack could also work for eg explosive trap, lets you kill the minion before it actually causes any damage
 (s/defn attack :- Board
   [board :- Board
-   attacker-id :- s/Int
-   defender-id :- s/Int]
-  (let [[attacker defender] (map #(->> %
-                                       (path-to-character board)
-                                       (safe-get-in board))
-                                 [attacker-id defender-id])]
-    (-> board
-        (cause-damage defender-id (create-attack-modifier attacker defender) true)
-        (cause-damage attacker-id (create-attack-modifier defender attacker) true)
-        (update-in (conj (path-to-character board attacker-id) :attacks-this-turn) inc)
-        (#(reduce process-death % (find-dead-characters-in-board %))))))
+   attacker :- Character
+   defender :- Character]
+  (-> board
+      (cause-damage defender (create-attack-modifier attacker defender) true)
+      (cause-damage attacker (create-attack-modifier defender attacker) true)
+      (update-in (conj (path-to-character board (:id attacker)) :attacks-this-turn) inc)
+      (#(reduce process-death % (find-dead-characters-in-board %)))))
 
 
 ; ok ok ok
@@ -101,5 +96,21 @@
 (s/defn get-enemy-characters :- [Character]
   [board :- Board
    player :- Player]
-  ; TODO concat the enemy hero to the result of get-enemy-minions
-  (get-enemy-minions board player))
+  (concat [(safe-get-in board [(other-player player) :hero])]
+          (get-enemy-minions board player)))
+
+(s/defn enter-targeting-mode-for-attack :- Board
+  [board :- Board
+   character :- Character]
+  (let [character-path (path-to-character board (:id character))
+        enemy-characters (get-enemy-characters board (first character-path))
+        targets (if (some has-taunt? enemy-characters)
+                  (filter has-taunt? enemy-characters)
+                  enemy-characters)]
+    (assoc board :mode {:type :targeting
+                        :targets targets
+                        :attacker (safe-get-in board character-path)
+                        :continuation (fn [board target-character]
+                                        (-> board
+                                            (assoc :mode {:type :default})
+                                            (attack character target-character)))})))
