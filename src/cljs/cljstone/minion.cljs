@@ -1,23 +1,30 @@
 (ns cljstone.minion
   (:require [schema.core :as s])
-  (:use [cljstone.card :only [Card get-next-card-id]]
-        [cljstone.character :only [Player Character CharacterModifier get-next-character-id]]))
+  (:use [cljstone.card :only [Card CardClass remove-card-from-list]]
+        [cljstone.character :only [Player Character CharacterModifier]]
+        [cljstone.hero :only [HeroClass]]
+        [cljstone.utils :only [get-next-id]]))
 
-(def MinionSchematic
+; TODO - will have to move this somewhere (character.cljs?) where weapons can use it when we implement weapons
+(s/defschema Battlecry
+  {(s/optional-key :get-targets) s/Any ; (Board, Player) -> [Character]
+   :effect s/Any
+   ; if :get-targets exists, :effect will be a function from (Board, target-character) -> Board
+   ; if :get-targets does not exist, :effect will be a function from Board -> Board
+   })
+
+(s/defschema MinionSchematic
   {:name s/Str
-   (s/optional-key :class) (s/enum :neutral :mage :shaman)
-   ; TODO imo the keystrokes we save by not naming these :base-attack and :base-health doesn't make up for the confusion these shorter keys cause
-   ; TODO standardize on :base-attack, :base-health
-   :attack s/Int
-   :health s/Int
+   (s/optional-key :class) HeroClass
+   :base-attack s/Int
+   :base-health s/Int
    :mana-cost s/Int
-   (s/optional-key :battlecry) s/Any ; (Board, target-character-id) -> Board
-   (s/optional-key :battlecry-targeting-fn) s/Any ; (Board, Player) -> [Character]
+   (s/optional-key :battlecry) Battlecry
    (s/optional-key :modifiers) [CharacterModifier]})
 
 (s/defschema Minion
   {:name s/Str
-   :class (s/enum :neutral :mage :shaman)
+   :class CardClass
    :base-attack s/Int
    :base-health s/Int
    :attacks-this-turn s/Int
@@ -45,51 +52,63 @@
   ; the machinery that sets up those channels and hooks them up to those functions will live here.
   [schematic :- MinionSchematic
    id :- s/Int]
-  (into {:base-attack (:attack schematic)
-         :base-health (:health schematic)
-         :attacks-this-turn 0
+  (into {:attacks-this-turn 0
          :attacks-per-turn 1 ; TODO - turn into :base-attacks-per-turn, there'll be modifiers that can add 1 to this number (will freezing remove 1 from this number?)
          :id id
          :modifiers []
          :type :minion
          :class (:class schematic :neutral)}
-        (dissoc schematic :attack :health :battlecry :battlecry-targeting-fn :mana-cost)))
+        (dissoc schematic :battlecry :mana-cost)))
 
-
+; XXXX misnomer? takes a schematic, not a card
 (s/defn play-minion-card
   [board
    player :- Player
    schematic :- MinionSchematic]
-  (-> board
-      (update-in [player :minions] conj (make-minion schematic (get-next-character-id)))
-      (update-in [player :mana-modifiers] conj (- (:mana-cost schematic)))))
+  (let [minion (-> schematic
+                   (make-minion (get-next-id))
+                   (update-in [:modifiers] (fn [modifiers]
+                                             (if (some #(get-in % [:effect :charge]) modifiers)
+                                               modifiers
+                                               (conj modifiers {:type :mechanic
+                                                                :name "Summoning Sickness"
+                                                                :turn-begins (:turn board)
+                                                                :turn-ends (+ 2 (:turn board))
+                                                                :effect {:cant-attack true}})))))]
+    (-> board
+        (update-in [player :minions] conj minion)
+        (update-in [player :mana-modifiers] conj (- (:mana-cost schematic))))))
 
 (s/defn minion-schematic->card :- Card
   [schematic :- MinionSchematic]
   {:type :minion
    :name (:name schematic)
    :mana-cost (:mana-cost schematic)
-   :id (get-next-card-id)
+   :id (get-next-id)
    :class (:class schematic :neutral)
-   :attack (:attack schematic)
-   :health (:health schematic)
+   :base-attack (:base-attack schematic)
+   :base-health (:base-health schematic)
    ; TODO break this out into a separate function, write tests, refactor
-   :effect (fn [board player new-hand]
+   :effect (fn [board player card]
              ; TODO implement positioning by associng :mode PositioningMode
              ; *then* do battlecries/targeting if applicable
              ; *then* play the minion at the right position in the board
              ; *then* take the relevant card out of the player's hand
              (if-let [battlecry (:battlecry schematic)]
+               ; TODO - handle a few cases we don't currently handle
+               ; 1) battlecry has no :get-targets function (in which case just go straight to the :effect function)
+               ; 2) battlecry *has* a :get-targets, but it returns [] - in which case we should behave the same as in 1)
+               ; right now if you try to play a shattered sun cleric and have no minions, the game crashes
                (assoc board :mode {:type :targeting
-                                   :targets ((schematic :battlecry-targeting-fn) board player)
+                                   :targets ((battlecry :get-targets) board player)
                                    :continuation (fn [board target-character-id]
                                                    (-> board
                                                        (assoc :mode {:type :default})
-                                                       (assoc-in [player :hand] new-hand)
-                                                       (#((schematic :battlecry) % target-character-id))
+                                                       (update-in [player :hand] remove-card-from-list card)
+                                                       (#((battlecry :effect) % target-character-id))
                                                        (play-minion-card player schematic)))})
                (-> board
-                   (assoc-in [player :hand] new-hand)
+                   (update-in [player :hand] remove-card-from-list card)
                    (play-minion-card player schematic))))})
 
 

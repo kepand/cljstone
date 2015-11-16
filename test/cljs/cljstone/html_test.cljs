@@ -1,5 +1,6 @@
 (ns cljstone.html-test
   (:require [cljs.test :refer-macros [async deftest is use-fixtures]]
+            [reagent.core :as r]
             [schema.core :refer-macros [with-fn-validation]])
   (:require-macros [cljs.core.async.macros :refer [go]])
   (:use [cljs.core.async :only [chan <! >! put! timeout alts!]]
@@ -15,10 +16,9 @@
 (deftest draw-playable-card
   (with-fn-validation
     (let [game-event-chan (chan)
-          card (draw-card goldshire-card 0 :player-2 (test-board :player-2) true game-event-chan)
+          card (draw-card goldshire-card 0 true game-event-chan)
           props (nth card 1)]
       (is (= (trim (props :class)) "card neutral minion playable"))
-      (is (= (props :data-card-index) 0))
       (is (= (nth card 2) [draw-minion-card goldshire-card]))
 
       ; fire a click event, test to see if something was put in game-event-chan
@@ -27,14 +27,13 @@
       (async done
          (go
            (is (= (<! game-event-chan)
-                  {:type :play-card
-                   :player :player-2
+                  {:type :select-card
                    :index 0}))
            (done))))))
 
 (deftest draw-unplayable-card
     (let [game-event-chan (chan)
-          card (draw-card boulderfist-card 0 :player-2 (test-board :player-2) true game-event-chan)
+          card (draw-card boulderfist-card 0 false game-event-chan)
           props (nth card 1)]
       ; boulderfist ogre's too expensive for us to play on turn 1, so it should be unplayable
       (is (= (trim (props :class)) "card neutral minion"))
@@ -79,7 +78,8 @@
 (deftest drawing-end-turn-button
   (with-fn-validation
     (let [game-event-chan (chan)
-          button (draw-end-turn-button {:game-event-chan game-event-chan})
+          button (draw-end-turn-button {:game-event-chan game-event-chan
+                                        :board-atom (r/atom test-board)})
           props (nth button 1) ]
 
       ; fire a click event, see if game-event-chan gets the message we expect

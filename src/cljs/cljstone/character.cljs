@@ -11,11 +11,18 @@
    (s/optional-key :base-attack) s/Int
    (s/optional-key :health) s/Int
    (s/optional-key :attack) s/Int
+   (s/optional-key :cant-attack) (s/enum true)
+   (s/optional-key :charge) (s/enum true)
+   (s/optional-key :divine-shield) (s/enum true)
+   (s/optional-key :frozen) (s/enum true) ; TODO
+   (s/optional-key :stealth) (s/enum true) ; TODO
    (s/optional-key :taunt) (s/enum true)})
 
 (s/defschema CharacterModifier
-  {:type (s/enum :attack :damage-spell :buff)
+  {:type (s/enum :attack :damage-spell :enchantment :mechanic)
    (s/optional-key :name) s/Str
+   (s/optional-key :turn-begins) s/Int
+   (s/optional-key :turn-ends) s/Int
    :effect CharacterEffect})
 
 ; TODO attacks-this-turn, attacks-per-turn
@@ -27,15 +34,6 @@
    :base-attack (s/conditional #(>= % 0) s/Int)
    :modifiers [CharacterModifier]
    s/Any s/Any})
-
-; IDs
-
-(def next-character-id (atom 0))
-
-(defn get-next-character-id []
-  (let [id-to-return @next-character-id]
-    (swap! next-character-id inc)
-    id-to-return))
 
 (s/defn other-player :- Player
   [player :- Player]
@@ -67,12 +65,30 @@
   [character :- Character]
   (get-base-attack character))
 
+(s/defn has-taunt? :- s/Bool
+  [character :- Character]
+  (boolean (some #(get-in % [:effect :taunt]) (character :modifiers))))
+
+(s/defn has-charge? :- s/Bool
+  [character :- Character]
+  (boolean (some #(get-in % [:effect :charge]) (character :modifiers))))
+
+(s/defn has-divine-shield? :- s/Bool
+  [character :- Character]
+  (boolean (some #(get-in % [:effect :divine-shield]) (character :modifiers))))
+
+(s/defn has-summoning-sickness? :- s/Bool
+  [character :- Character]
+  (boolean (some #(= (:name %) "Summoning Sickness")
+                 (character :modifiers))))
+
 (s/defn can-attack? :- s/Bool
   [character :- Character]
   (and (< (character :attacks-this-turn)
           (character :attacks-per-turn))
-       (> (get-attack character) 0)))
-
-(s/defn has-taunt? :- s/Bool
-  [character :- Character]
-  (boolean (some #(get-in % [:effect :taunt]) (character :modifiers))))
+       (> (get-attack character) 0)
+       (not (or (some #(get-in % [:effect :cant-attack])
+                      (character :modifiers))
+                ; frozen differs from cant-attack in that it's drawn specially, and that it triggers bonus ice lance damage
+                (some #(get-in % [:effect :frozen])
+                      (character :modifiers))))))

@@ -3,19 +3,28 @@
             [cljs.test :refer-macros [deftest testing is use-fixtures]])
   (:use [schema.test :only [validate-schemas]]
         [cljstone.bestiary :only [all-minions]]
-        [cljstone.board :only [make-board play-card]]
+        [cljstone.board :only [make-board play-card run-continuation end-turn Board]]
         [cljstone.card :only [Card]]
-        [cljstone.character :only [get-next-character-id]]
-        [cljstone.dealer :only [make-random-deck]]
+        [cljstone.dealer :only [make-random-deck vanilla-minions NUM-CARDS-IN-DECK]]
         [cljstone.hero :only [make-hero]]
-        [cljstone.minion :only [Minion make-minion minion-schematic->card]]))
+        [cljstone.minion :only [Minion make-minion minion-schematic->card]]
+        [cljstone.utils :only [get-next-id]]))
 
 (use-fixtures :once validate-schemas)
 
 (def hero-1 (make-hero "Jaina" :mage))
 (def hero-2 (make-hero "Thrall" :shaman))
 
-(def fresh-board (make-board hero-1 (make-random-deck) hero-2 (make-random-deck)))
+(s/defn make-random-vanilla-minions-deck :- [Card]
+  []
+  (repeatedly NUM-CARDS-IN-DECK #(minion-schematic->card (rand-nth vanilla-minions))))
+
+(def fresh-board
+  (-> (make-board hero-1 (make-random-vanilla-minions-deck) hero-2 (make-random-vanilla-minions-deck))
+      run-continuation
+      end-turn
+      run-continuation
+      end-turn))
 
 (s/defn get-minion-card :- Card
   [minion-keyword]
@@ -23,7 +32,7 @@
 
 (s/defn get-minion :- Minion
   [minion-keyword]
-  (make-minion (all-minions minion-keyword) (get-next-character-id)))
+  (make-minion (all-minions minion-keyword) (get-next-id)))
 
 (def boulderfist-card (-> all-minions :boulderfist-ogre minion-schematic->card))
 (def boulderfist-minion (-> all-minions :boulderfist-ogre (make-minion 12345)))

@@ -14,7 +14,7 @@
 
 (s/defn make-random-deck :- [Card]
   []
-  (-> (mapv minion-schematic->card
-            (repeatedly NUM-CARDS-IN-DECK #(rand-nth vanilla-minions)))
-      (assoc 4 (spell->card (all-spells :flamecannon)))
-      (assoc 6 (minion-schematic->card (all-minions :shattered-sun)))))
+  (let [minions (mapv minion-schematic->card (vals all-minions))
+        spells (mapv spell->card (vals all-spells))
+        all-cards (concat minions spells)]
+    (take NUM-CARDS-IN-DECK (shuffle all-cards))))
