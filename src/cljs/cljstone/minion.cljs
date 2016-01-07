@@ -41,10 +41,8 @@
 ; also: summoning sickness can be implemented as a one-turn modifier with effect :cant-attack true
 ; freezing will work similarly
 
-; Schematics
-
-
 ; TODO - on-before-attack for ogre brute, on-after-attack for mistress of pain
+
 
 (s/defn make-minion :- Minion
   ; TODO - MinionSchematics will eventually have k/v pairs like :on-summon-minion a-fn
@@ -60,8 +58,7 @@
          :class (:class schematic :neutral)}
         (dissoc schematic :battlecry :mana-cost)))
 
-; XXXX misnomer? takes a schematic, not a card
-(s/defn play-minion-card
+(s/defn summon-minion
   [board
    player :- Player
    schematic :- MinionSchematic]
@@ -79,6 +76,32 @@
         (update-in [player :minions] conj minion)
         (update-in [player :mana-modifiers] conj (- (:mana-cost schematic))))))
 
+(s/defn minion-card-effect
+  [board
+   player :- Player
+   card :- Card
+   schematic :- MinionSchematic]
+   ; TODO implement positioning by associng :mode PositioningMode
+   ; *then* do battlecries/targeting if applicable
+   ; *then* play the minion at the right position in the board
+   ; *then* take the relevant card out of the player's hand
+   (if-let [battlecry (:battlecry schematic)]
+     ; TODO - handle a few cases we don't currently handle
+     ; 1) battlecry has no :get-targets function (in which case just go straight to the :effect function)
+     ; 2) battlecry *has* a :get-targets, but it returns [] - in which case we should behave the same as in 1)
+     ; right now if you try to play a shattered sun cleric and have no minions, the game crashes
+     (assoc board :mode {:type :targeting
+                         :targets ((battlecry :get-targets) board player)
+                         :continuation (fn [board target-character-id]
+                                         (-> board
+                                             (assoc :mode {:type :default})
+                                             (update-in [player :hand] remove-card-from-list card)
+                                             (#((battlecry :effect) % target-character-id))
+                                             (summon-minion player schematic)))})
+     (-> board
+         (update-in [player :hand] remove-card-from-list card)
+         (summon-minion player schematic))))
+
 (s/defn minion-schematic->card :- Card
   [schematic :- MinionSchematic]
   {:type :minion
@@ -88,29 +111,8 @@
    :class (:class schematic :neutral)
    :base-attack (:base-attack schematic)
    :base-health (:base-health schematic)
-   ; TODO break this out into a separate function, write tests, refactor
    :effect (fn [board player card]
-             ; TODO implement positioning by associng :mode PositioningMode
-             ; *then* do battlecries/targeting if applicable
-             ; *then* play the minion at the right position in the board
-             ; *then* take the relevant card out of the player's hand
-             (if-let [battlecry (:battlecry schematic)]
-               ; TODO - handle a few cases we don't currently handle
-               ; 1) battlecry has no :get-targets function (in which case just go straight to the :effect function)
-               ; 2) battlecry *has* a :get-targets, but it returns [] - in which case we should behave the same as in 1)
-               ; right now if you try to play a shattered sun cleric and have no minions, the game crashes
-               (assoc board :mode {:type :targeting
-                                   :targets ((battlecry :get-targets) board player)
-                                   :continuation (fn [board target-character-id]
-                                                   (-> board
-                                                       (assoc :mode {:type :default})
-                                                       (update-in [player :hand] remove-card-from-list card)
-                                                       (#((battlecry :effect) % target-character-id))
-                                                       (play-minion-card player schematic)))})
-               (-> board
-                   (update-in [player :hand] remove-card-from-list card)
-                   (play-minion-card player schematic))))})
-
+             (minion-card-effect board player card schematic))})
 
 ; dire wolf alpha only needs to care about on-summon-friendly-minion, on-friendly-minion-death - no other situations cause a dire wolf alpha buff/debuff
 ; still need to figure out what happens when you silence something that's had its health buffed and has taken 1 damage, though.

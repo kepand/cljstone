@@ -1,12 +1,44 @@
 (ns cljstone.spellbook
   (:require [schema.core :as s])
-  (:use [cljstone.board :only [Board draw-a-card]]
-        [cljstone.character :only [Player other-player]]
-        [cljstone.combat :only [all-characters cause-damage get-enemy-characters get-enemy-minions]]
-        [plumbing.core :only [safe-get-in]]))
+  (:use [cljstone.board :only [Board draw-a-card path-to-character]]
+        [cljstone.character :only [Character CharacterModifier Player other-player]]
+        [cljstone.combat :only [all-characters get-all-minions cause-damage get-enemy-characters get-enemy-minions]]
+        [plumbing.core :only [safe-get safe-get-in]]))
+
+(s/defn character-modifiers-path :- [s/Any]
+  [board :- Board
+   character :- Character]
+  (conj (path-to-character board (safe-get character :id))
+                   :modifiers))
+
+(s/defn add-modifier-to-character :- Board
+  [board :- Board
+   character :- Character
+   modifier :- CharacterModifier]
+  (update-in board
+             (character-modifiers-path board character)
+             conj
+             modifier))
 
 (def all-spells
-  {:moonfire {:name "Moonfire", :class :druid, :mana-cost 0,
+  {:hunters-mark {:name "Hunter's Mark", :class :hunter, :mana-cost 0,
+                  :get-targets (fn [board caster]
+                                 (get-all-minions board))
+                  :effect (fn [board target-character caster]
+                            (-> board
+                                ; TODO - split this out into a function, clear-modifiers-with-effect or something
+                                (update-in (character-modifiers-path board target-character)
+                                           (fn [modifiers]
+                                             (filter (s/fn :- s/Bool
+                                                       [modifier :- CharacterModifier]
+                                                       (boolean
+                                                         (or (= (modifier :type) :aura)
+                                                             (not (contains? (modifier :effect) :health)))))
+                                                     modifiers)))
+                                (add-modifier-to-character target-character {:type :enchantment
+                                                                             :name "Hunter's Mark"
+                                                                             :effect {:base-health 1}})))}
+   :moonfire {:name "Moonfire", :class :druid, :mana-cost 0,
               :get-targets (fn [board caster]
                              (all-characters board))
               :effect (fn [board target-character caster]
@@ -38,6 +70,17 @@
                                         {:type :damage-spell
                                          :name "Holy Smite"
                                          :effect {:health -2}}))}
+   :humility {:name "Humility", :class :paladin, :mana-cost 1,
+              :get-targets (fn [board caster]
+                             (get-all-minions board))
+              :effect (fn [board target-character caster]
+                        ; XXX TODO will probably have to clear all preexisting attack modifiers.
+                        ; what's an example of a situation where this implementation of humility wouldn't behave correctly?
+                        ; what if the minion's been buffed by lance carrier? then we'd be fucked.
+                        ; so clear all preexisting attack modifiers first.
+                        (add-modifier-to-character board target-character {:type :enchantment
+                                                                           :name "Humility"
+                                                                           :effect {:base-attack 1}}))}
   :flamecannon {:name "Flamecannon"
                 :mana-cost 2
                 :class :mage
@@ -59,7 +102,7 @@
                         (cause-damage target-character
                                       {:type :damage-spell
                                        :name "Shiv"
-                                       :effect {:health -2}})
+                                       :effect {:health -1}})
                         (draw-a-card caster)))}
    :arcane-intellect {:name "Arcane Intellect"
                       :mana-cost 3
@@ -126,7 +169,6 @@
  {:name "Holy Nova", :text "Deal $2 damage to all enemies. Restore #2 Health to all friendly characters.", :class :priest, :mana-cost 5}
  {:name "Holy Smite", :text "Deal $2 damage.", :class :priest, :mana-cost 1}
  {:name "Humility", :text "Change a minion's Attack to 1.", :class :paladin, :mana-cost 1}
- {:name "Hunter's Mark", :text "Change a minion's Health to 1.", :class :hunter, :mana-cost 0}
  {:name "Innervate", :text "Gain 2 Mana Crystals this turn only.", :class :druid, :mana-cost 0}
  {:name "Kill Command", :text "Deal $3 damage. If you have a Beast, deal $5 damage instead.", :class :hunter, :mana-cost 3}
  {:name "Mark of the Wild", :text "Give a minion <b>Taunt</b> and +2/+2.<i> (+2 Attack/+2 Health)</i>", :class :druid, :mana-cost 2}

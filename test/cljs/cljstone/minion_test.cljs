@@ -4,7 +4,7 @@
   (:use [cljstone.bestiary :only [all-minions]]
         [cljstone.card :only [Card]]
         [cljstone.character :only [get-health has-summoning-sickness? can-attack?]]
-        [cljstone.minion :only [Minion MinionSchematic make-minion play-minion-card]]
+        [cljstone.minion :only [Minion MinionSchematic make-minion]]
         [cljstone.test-helpers :only [get-minion-card fresh-board]]
         [plumbing.core :only [safe-get safe-get-in]]
         [schema.test :only [validate-schemas]]))
@@ -20,7 +20,7 @@
     (let [minion (-> all-minions
                      :boulderfist-ogre
                      (make-minion 123)
-                     (update-in [:modifiers] conj {:type :mechanic :name "foo" :effect {:base-health 1}})
+                     (update-in [:modifiers] conj {:type :mechanic :name "foo" :effect {:health 1}})
                      (update-in [:modifiers] conj {:type :attack :effect {:health -2}}))]
       (is (= (get-health minion) 6))))
 
